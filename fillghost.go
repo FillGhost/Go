@@ -8,14 +8,15 @@ import (
 	"time"
 )
 
-// FillGhostConfig 填充参数
+// FillGhostConfig 配置自动注入的参数
 type FillGhostConfig struct {
-	MinLen, MaxLen int           // 随机明文长度（不含ContentType字节）
-	Interval       time.Duration // 每个包之间的最小间隔（如不需要限速，可为0）
-	InitialDelay   time.Duration // 注入前的延迟
+	MinLen       int           // 最小负载长度
+	MaxLen       int           // 最大负载长度
+	Interval     time.Duration // 注入包间隔
+	InitialDelay time.Duration // 初始延迟
 }
 
-// FillGhostController 控制生命周期
+// FillGhostController 控制自动注入
 type FillGhostController struct {
 	c         *Conn
 	cfg       FillGhostConfig
@@ -25,7 +26,7 @@ type FillGhostController struct {
 	active    bool
 }
 
-// NewFillGhostController 新建一个注入控制器
+// NewFillGhostController 构造控制器
 func NewFillGhostController(c *Conn, cfg FillGhostConfig) *FillGhostController {
 	return &FillGhostController{
 		c:         c,
@@ -35,13 +36,12 @@ func NewFillGhostController(c *Conn, cfg FillGhostConfig) *FillGhostController {
 	}
 }
 
-// Start 填充启动（异步）
-// 可多次 start/stop
+// Start 开始注入
 func (fg *FillGhostController) Start() error {
 	fg.mu.Lock()
 	defer fg.mu.Unlock()
 	if fg.active {
-		return errors.New("fillghost: already running")
+		return errors.New("FillGhost already running")
 	}
 	fg.stopCh = make(chan struct{})
 	fg.stoppedCh = make(chan struct{})
@@ -50,18 +50,18 @@ func (fg *FillGhostController) Start() error {
 	return nil
 }
 
-// Stop 注入停止
+// Stop 停止注入
 func (fg *FillGhostController) Stop() {
 	fg.mu.Lock()
 	defer fg.mu.Unlock()
 	if fg.active {
 		close(fg.stopCh)
-		<-fg.stoppedCh // 等待真正退出
+		<-fg.stoppedCh
 		fg.active = false
 	}
 }
 
-// loop 主注入循环
+// loop 内部注入循环
 func (fg *FillGhostController) loop() {
 	defer close(fg.stoppedCh)
 	if fg.cfg.InitialDelay > 0 {
@@ -79,7 +79,7 @@ func (fg *FillGhostController) loop() {
 		}
 		err := fg.injectOne()
 		if err != nil {
-			// 可以日志输出
+			// 可以log输出
 			return
 		}
 		if fg.cfg.Interval > 0 {
@@ -99,8 +99,6 @@ func (fg *FillGhostController) injectOne() error {
 		return errors.New("fillghost: no AEAD cipher")
 	}
 	seq := fg.c.ExportWriteSeq()
-
-	// 生成明文长度
 	L, err := cryptoRandInt(fg.cfg.MinLen, fg.cfg.MaxLen)
 	if err != nil {
 		return err
@@ -110,7 +108,6 @@ func (fg *FillGhostController) injectOne() error {
 	if err != nil {
 		return err
 	}
-	// 末尾加ContentType
 	padded := append(payload, byte(0x17))
 	header := []byte{0x17, 0x03, 0x03, 0, 0}
 	ciphertext := aead.Seal(nil, seq[:], padded, header[:5])
@@ -118,11 +115,9 @@ func (fg *FillGhostController) injectOne() error {
 	header[3] = byte(ln >> 8)
 	header[4] = byte(ln)
 	record := append(header, ciphertext...)
-	// 注入
 	if err := fg.c.FillGhostInjectRawRecord(record); err != nil {
 		return err
 	}
-	// 递增序号
 	fg.c.FillGhostIncWriteSeq()
 	return nil
 }
