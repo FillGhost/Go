@@ -1,4 +1,4 @@
-module github.com/GoTLS/Go
+module github.com/FillGhost/Go
 
 go 1.18
 
