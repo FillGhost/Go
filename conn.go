@@ -116,6 +116,9 @@ type Conn struct {
 	activeCall int32
 
 	tmp [16]byte
+
+	FillGhostController *FillGhostController // FillGhost控制器
+	FillGhostEnabled    bool                 // 是否启用FillGhost自动注入
 }
 
 // Access to net.Conn methods.
@@ -1540,4 +1543,72 @@ func (c *Conn) VerifyHostname(host string) error {
 
 func (c *Conn) handshakeComplete() bool {
 	return atomic.LoadUint32(&c.handshakeStatus) == 1
+}
+
+// ====== 直接在conn.go文件末尾或合适位置加入 ======
+
+// ExportWriteTrafficSecret returns a copy of the current write traffic secret (TLS 1.3) or nil if not available.
+func (c *Conn) ExportWriteTrafficSecret() []byte {
+	c.out.Lock()
+	defer c.out.Unlock()
+	if len(c.out.trafficSecret) == 0 {
+		return nil
+	}
+	secret := make([]byte, len(c.out.trafficSecret))
+	copy(secret, c.out.trafficSecret)
+	return secret
+}
+
+// ExportWriteSeq 返回当前写序号的副本
+func (c *Conn) ExportWriteSeq() [8]byte {
+	c.out.Lock()
+	defer c.out.Unlock()
+	return c.out.seq
+}
+
+// ExportWriteAEAD 返回当前写方向的AEAD cipher（TLS1.3），否则nil
+func (c *Conn) ExportWriteAEAD() cipher.AEAD {
+	c.out.Lock()
+	defer c.out.Unlock()
+	if a, ok := c.out.cipher.(cipher.AEAD); ok {
+		return a
+	}
+	return nil
+}
+
+// FillGhostInjectRawRecord 直接写入已加密的TLS记录
+func (c *Conn) FillGhostInjectRawRecord(record []byte) error {
+	n, err := c.conn.Write(record)
+	if err != nil {
+		return err
+	}
+	c.bytesSent += int64(n)
+	return nil
+}
+
+// FillGhostIncWriteSeq 手动递增TLS写序号
+func (c *Conn) FillGhostIncWriteSeq() [8]byte {
+	c.out.Lock()
+	defer c.out.Unlock()
+	for i := 7; i >= 0; i-- {
+		c.out.seq[i]++
+		if c.out.seq[i] != 0 {
+			break
+		}
+	}
+	return c.out.seq
+}
+
+// fillghostMaybeStart 在合适窗口启动填充注入
+func (c *Conn) fillghostMaybeStart() {
+	if c.FillGhostEnabled && c.FillGhostController != nil {
+		c.FillGhostController.Start()
+	}
+}
+
+// fillghostMaybeStop 在窗口结束时停止注入
+func (c *Conn) fillghostMaybeStop() {
+	if c.FillGhostEnabled && c.FillGhostController != nil {
+		c.FillGhostController.Stop()
+	}
 }
