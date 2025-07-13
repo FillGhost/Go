@@ -1541,3 +1541,58 @@ func (c *Conn) VerifyHostname(host string) error {
 func (c *Conn) handshakeComplete() bool {
 	return atomic.LoadUint32(&c.handshakeStatus) == 1
 }
+
+// ====== 直接在conn.go文件末尾或合适位置加入 ======
+
+// ExportWriteTrafficSecret returns a copy of the current write traffic secret (TLS 1.3) or nil if not available.
+func (c *Conn) ExportWriteTrafficSecret() []byte {
+	c.out.Lock()
+	defer c.out.Unlock()
+	if len(c.out.trafficSecret) == 0 {
+		return nil
+	}
+	secret := make([]byte, len(c.out.trafficSecret))
+	copy(secret, c.out.trafficSecret)
+	return secret
+}
+
+// ExportWriteSeq returns a copy of the current write sequence number.
+func (c *Conn) ExportWriteSeq() [8]byte {
+	c.out.Lock()
+	defer c.out.Unlock()
+	return c.out.seq
+}
+
+// ExportWriteAEAD returns the AEAD cipher for the write direction (TLS 1.3), or nil.
+func (c *Conn) ExportWriteAEAD() cipher.AEAD {
+	c.out.Lock()
+	defer c.out.Unlock()
+	if a, ok := c.out.cipher.(cipher.AEAD); ok {
+		return a
+	}
+	return nil
+}
+
+// FillGhostInjectRawRecord writes a fully-formed (already AEAD加密好的) TLS record原样到TCP层。
+// record必须是完整的TLS Record，包括header和密文，不会再二次加密。
+func (c *Conn) FillGhostInjectRawRecord(record []byte) error {
+	n, err := c.conn.Write(record)
+	if err != nil {
+		return err
+	}
+	c.bytesSent += int64(n)
+	return nil
+}
+
+// FillGhostIncWriteSeq 手动递增TLS写方向序号，返回递增后的序号。
+func (c *Conn) FillGhostIncWriteSeq() [8]byte {
+	c.out.Lock()
+	defer c.out.Unlock()
+	for i := 7; i >= 0; i-- {
+		c.out.seq[i]++
+		if c.out.seq[i] != 0 {
+			break
+		}
+	}
+	return c.out.seq
+}
