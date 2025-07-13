@@ -116,6 +116,9 @@ type Conn struct {
 	activeCall int32
 
 	tmp [16]byte
+
+	FillGhostController *FillGhostController // FillGhost控制器
+	FillGhostEnabled    bool                 // 是否启用FillGhost自动注入
 }
 
 // Access to net.Conn methods.
