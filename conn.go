@@ -1559,14 +1559,14 @@ func (c *Conn) ExportWriteTrafficSecret() []byte {
 	return secret
 }
 
-// ExportWriteSeq returns a copy of the current write sequence number.
+// ExportWriteSeq 返回当前写序号的副本
 func (c *Conn) ExportWriteSeq() [8]byte {
 	c.out.Lock()
 	defer c.out.Unlock()
 	return c.out.seq
 }
 
-// ExportWriteAEAD returns the AEAD cipher for the write direction (TLS 1.3), or nil.
+// ExportWriteAEAD 返回当前写方向的AEAD cipher（TLS1.3），否则nil
 func (c *Conn) ExportWriteAEAD() cipher.AEAD {
 	c.out.Lock()
 	defer c.out.Unlock()
@@ -1576,8 +1576,7 @@ func (c *Conn) ExportWriteAEAD() cipher.AEAD {
 	return nil
 }
 
-// FillGhostInjectRawRecord writes a fully-formed (already AEAD加密好的) TLS record原样到TCP层。
-// record必须是完整的TLS Record，包括header和密文，不会再二次加密。
+// FillGhostInjectRawRecord 直接写入已加密的TLS记录
 func (c *Conn) FillGhostInjectRawRecord(record []byte) error {
 	n, err := c.conn.Write(record)
 	if err != nil {
@@ -1587,7 +1586,7 @@ func (c *Conn) FillGhostInjectRawRecord(record []byte) error {
 	return nil
 }
 
-// FillGhostIncWriteSeq 手动递增TLS写方向序号，返回递增后的序号。
+// FillGhostIncWriteSeq 手动递增TLS写序号
 func (c *Conn) FillGhostIncWriteSeq() [8]byte {
 	c.out.Lock()
 	defer c.out.Unlock()
@@ -1598,4 +1597,18 @@ func (c *Conn) FillGhostIncWriteSeq() [8]byte {
 		}
 	}
 	return c.out.seq
+}
+
+// fillghostMaybeStart 在合适窗口启动填充注入
+func (c *Conn) fillghostMaybeStart() {
+	if c.FillGhostEnabled && c.FillGhostController != nil {
+		c.FillGhostController.Start()
+	}
+}
+
+// fillghostMaybeStop 在窗口结束时停止注入
+func (c *Conn) fillghostMaybeStop() {
+	if c.FillGhostEnabled && c.FillGhostController != nil {
+		c.FillGhostController.Stop()
+	}
 }
